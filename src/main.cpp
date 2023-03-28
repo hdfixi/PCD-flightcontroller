@@ -2,12 +2,20 @@
 #include <SPI.h> 
 #include "nRF24L01.h"
 #include "RF24.h" 
+#include "BluetoothSerial.h"
+//bluetooth
+BluetoothSerial SerialBT;
+
 //DEBUG
 //#define DEBUG_MPU
-#define DEBUG_NRF
-//#define DEBUG_MOTORS_SPEED
+//#define DEBUG_NRF
+#define DEBUG_MOTORS_SPEED
 //#define DEBUG_PID_VALUES
-
+//#define fixi
+//#define fixir
+//#define fixi_motors
+//radio mid points 
+//Yaw:1473 Roll:1465 Pitch :1454
 
 
 #define CE 12
@@ -45,7 +53,7 @@ bool calibrate = true;
 void inline MPU_Angles_Avr(int16_t &rollavr, int16_t &pitchavr, int16_t &yawavr);
 void inline Measured_Roll_Pitch_Yaw(int16_t & Roll, int16_t & Pitch, int16_t & Yaw);
 
-#define PID_PITCH_kp 2.3
+#define PID_PITCH_kp 1
 #define PID_PITCH_ki 0
 #define PID_PITCH_kd 0
 
@@ -121,7 +129,7 @@ receiver.begin();// Begin operation of the chip.
   setting.gyro_dlpf_cfg       = GYRO_DLPF_CFG::DLPF_41HZ;
   setting.accel_fchoice       = 0x01;
   setting.accel_dlpf_cfg      = ACCEL_DLPF_CFG::DLPF_45HZ;
-  mpu.setMagneticDeclination(3.11); //tunisia 26 mars
+  mpu.setMagneticDeclination(3.11f); //tunisia 26 mars
 
 Wire.begin();
 if (!mpu.setup(0x68))
@@ -138,8 +146,8 @@ Serial.println("Failed to initialize MPU9250.");
     accCalib();
 mpu.calibrateAccelGyro();
     digitalWrite(Bled,0);
-    magnCalib();
-mpu.calibrateMag();
+     magnCalib();
+ mpu.calibrateMag();
     digitalWrite(Gled,0);
     Readytogo();
 
@@ -148,8 +156,7 @@ mpu.calibrateMag();
 
 
 void loop(){
-  int16_t RollPIDOutput   = ExecuteRollPID(values_received[2], Roll);
-  int16_t PitchPIDOutput  = ExecutePitchPID(values_received[3], Pitch);
+Measured_Roll_Pitch_Yaw(Roll, Pitch, Yaw);
 if(receiver.available()){
 receiver.read(values_received, sizeof(int16_t)*4);
   #ifdef DEBUG_NRF
@@ -163,8 +170,8 @@ receiver.read(values_received, sizeof(int16_t)*4);
     Serial.print(values_received[3]);
    Serial.println("   ");
    #endif 
-   UpdateMotorsValues(values_received[0],PitchPIDOutput,0,0);
-   #ifdef DEBUG_MOTORS_SPEED
+   //UpdateMotorsValues(values_received[0],PitchPIDOutput,0,0);
+   #ifdef fixi_motors
 MOTOR_0.writeMicroseconds(values_received[0]);
 MOTOR_1.writeMicroseconds(values_received[0]);
 MOTOR_2.writeMicroseconds(values_received[0]);
@@ -181,17 +188,22 @@ MOTOR_1.writeMicroseconds(MIN_THROTTLE);
 MOTOR_2.writeMicroseconds(MIN_THROTTLE);
 MOTOR_3.writeMicroseconds(MIN_THROTTLE);
 }
+
 if (mpu.update()) {
-    #ifdef DEBUG_MODE
-      Serial.print(mpu.getYaw()); Serial.print(", ");
-      Serial.print(mpu.getPitch()); Serial.print(", ");
-      Serial.println(mpu.getRoll());
+  
+    #ifdef DEBUG_MPU
+       Serial.print(", Yaw:");Serial.print(Yaw);
+      Serial.print(", Pitch:");Serial.print(Pitch); 
+      Serial.print(", Roll:");Serial.println(Roll);
+      //delay(50);
     #endif
-    Measured_Roll_Pitch_Yaw(Roll, Pitch, Yaw);
+    
   }
+int16_t RollPIDOutput   = ExecuteRollPID(values_received[2], Roll);
+int16_t PitchPIDOutput  = ExecutePitchPID(values_received[3], Pitch);
+UpdateMotorsValues(values_received[0],PitchPIDOutput,RollPIDOutput ,0);
 
-
-
+//delay(10);
 
 }
 
@@ -217,10 +229,10 @@ Serial.print("Calibration done");
 //this function measures the roll, pitch and yaw
 void inline Measured_Roll_Pitch_Yaw(int16_t & Roll, int16_t & Pitch, int16_t & Yaw){
 if (mpu.update()) {
-Roll = mpu.getRoll() - rollAvr - 2;
+Roll = mpu.getRoll() - rollAvr -2;
 Pitch = mpu.getPitch() - pitchAvr +2;
 Yaw = mpu.getYaw() - yawAvr;
-#ifdef DEBUG_MPU
+#ifdef DEBUG_MPUU
 Serial.print("Roll: ");
 Serial.print(Roll);
 Serial.print(" Pitch: ");
@@ -238,13 +250,23 @@ float error;
 float integral = .0;
 float proportional;
 float derivative;
-error = static_cast<float>(pitch_set_point - measured_pitch);
+long psp=map(pitch_set_point,1000,2000,-54,66);
+psp=max((long)-54,min(psp,(long)54));
+error = static_cast<float>(psp- measured_pitch);
 //if(error<=5 && error>=-5)
 // error = 0;
 proportional = PID_PITCH_kp * error;
 derivative = PID_PITCH_kd * (error - (previous_roll_error));
 integral += PID_PITCH_ki * (previous_roll_error + error)/2;
 previous_pitch_error = error;
+#ifdef fixi
+Serial.print(" error:");
+Serial.print(proportional + integral + derivative);
+Serial.print(" mesured pitch:");
+Serial.print(measured_pitch);
+Serial.print(" pitch:");
+Serial.println(psp);
+#endif
 return static_cast<int16_t>(proportional + integral + derivative);
 }
 
@@ -253,23 +275,38 @@ float error;
 float integral = .0;
 float proportional;
 float derivative;
-error = roll_set_point - measured_roll;
+long rsp=map(roll_set_point,1000,2000,-55,65);
+rsp=max((long)-54,min(rsp,(long)54));
+error = rsp - measured_roll;
 //if(error<=10 && error>=-10)
 //error = 0;
 proportional = PID_ROLL_kp * error;
 derivative =PID_ROLL_kd* (error - (previous_roll_error));
 integral += PID_ROLL_ki* (previous_roll_error + error)/2;
 previous_roll_error = error;
+#ifdef fixir
+Serial.print(" error:");
+Serial.print(proportional + integral + derivative);
+Serial.print(" mesured pitch:");
+Serial.print(measured_roll);
+Serial.print(" roll:");
+Serial.println(rsp);
+#endif
 return static_cast<int16_t>(proportional + integral + derivative);
 }
 void inline UpdateMotorsValues( const int16_t throttle, const int16_t pitch_pid_output,
 const int16_t roll_pid_output, const int16_t yaw_pid_output) {
-int16_t m0 = throttle - pitch_pid_output - roll_pid_output + yaw_pid_output;
-int16_t m1 = throttle - pitch_pid_output + roll_pid_output - yaw_pid_output;
-int16_t m2 = throttle + pitch_pid_output - roll_pid_output - yaw_pid_output;
-int16_t m3 = throttle + pitch_pid_output + roll_pid_output + yaw_pid_output;
+long m0 = throttle - pitch_pid_output - roll_pid_output + yaw_pid_output;
+long m1 = throttle - pitch_pid_output + roll_pid_output - yaw_pid_output;
+long m2 = throttle + pitch_pid_output + roll_pid_output + yaw_pid_output;
+long m3 = throttle + pitch_pid_output - roll_pid_output - yaw_pid_output;
 
 
+
+m0=max((long)MIN_THROTTLE,min((long)MAX_THROTTLE,m0));
+m1=max((long)MIN_THROTTLE,min((long)MAX_THROTTLE,m1));
+m2=max((long)MIN_THROTTLE,min((long)MAX_THROTTLE,m2));
+m3=max((long)MIN_THROTTLE,min((long)MAX_THROTTLE,m3));
 #ifdef DEBUG_MOTORS_SPEED
 Serial.print(" m0 : ");
 Serial.print(m0);
@@ -283,7 +320,7 @@ Serial.print("\n");
 #endif
 MOTOR_0.writeMicroseconds(m0);
 MOTOR_1.writeMicroseconds(m1);
-MOTOR_2.writeMicroseconds(m2);
+ MOTOR_2.writeMicroseconds(m2);
 MOTOR_3.writeMicroseconds(m3);
 }
 void Readytogo(){
