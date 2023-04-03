@@ -3,20 +3,20 @@
 #include <SPI.h> 
 #include "nRF24L01.h"
 #include "RF24.h" 
-
+#include "wificalib.h"
 //bluetooth
 
 
 //DEBUG
 #define calib
 //#define DEBUG_MPU
-#define PID
+//#define PID
 //#define DEBUG_NRF
 //#define DEBUG_MOTORS_SPEED
 //#define DEBUG_PID_VALUES
 //#define fixi
 //#define fixir
-//#define fixiy
+#define fixiy
 //#define fixi_motors
 //radio mid points 
 //Yaw:1473 Roll:1465 Pitch :1454
@@ -57,16 +57,16 @@ bool calibrate = true;
 void inline MPU_Angles_Avr(int16_t &rollavr, int16_t &pitchavr, int16_t &yawavr);
 void inline Measured_Roll_Pitch_Yaw(int16_t & Roll, int16_t & Pitch, int16_t & Yaw);
 
-#define PID_PITCH_kp 0
-#define PID_PITCH_kd 0
+#define PID_PITCH_kp 1.8
+#define PID_PITCH_kd 1
 #define PID_PITCH_ki 0
 
 #define PID_ROLL_kp PID_PITCH_kp
 #define PID_ROLL_kd PID_PITCH_kd
 #define PID_ROLL_ki PID_PITCH_ki
 
-#define PID_YAW_kp 1
-#define PID_YAW_kd 2
+#define PID_YAW_kp 2
+#define PID_YAW_kd 0
 #define PID_YAW_ki 0
 
 float previous_pitch_error = .0;
@@ -92,11 +92,33 @@ Servo MOTOR_3;
 RF24 receiver(12, 14, 26, 25, 27);
 //RF24 (CE, CSN, SCK, MISO, MOSI); //check link for class methods:https://maniacbug.github.io/RF24/classRF24.html
 
-const uint64_t p= 0xE8E8F0F0E2LL;//IMPORTANT: The same as in the transmitter
+const uint64_t p= 0x00000001;//IMPORTANT: The same as in the transmitter
 
 int16_t values_received[4];
+int16_t r,pii,y;
+void Task1code( void *parameter) {
+  setupwificalib();
+  for(;;) {
+  mainwificalib();
+  }
+}
+
+
+
 
 void setup(void){
+  //wifi task
+TaskHandle_t Task1;
+xTaskCreatePinnedToCore(
+      Task1code, /* Function to implement the task */
+      "Task1", /* Name of the task */
+      10000,  /* Stack size in words */
+      NULL,  /* Task input parameter */
+      0,  /* Priority of the task */
+      &Task1,  /* Task handle. */
+      0); /* Core where the task should run */
+
+
 //wireless upload 
  //WiFi_setup(1); WebSerial_setup();  OTA_setup();
 #ifdef DEBUG
@@ -158,6 +180,7 @@ mpu.calibrateAccelGyro();
     Readytogo();
 #endif
 
+Measured_Roll_Pitch_Yaw(r, pii, y);
 }
 
 void loop(){
@@ -176,6 +199,7 @@ if(receiver.available()){
 receiver.read(values_received, sizeof(values_received));
 digitalWrite(Bled,1);
   digitalWrite(Rled,1);
+
   #ifdef DEBUG_NRF
       Serial.print("throtlle:");
   Serial.print(values_received[0]);
@@ -199,7 +223,7 @@ MOTOR_3.writeMicroseconds(values_received[0]);
 if(values_received[0]>1050){
 int16_t RollPIDOutput   = ExecuteRollPID(values_received[2], Roll);
 int16_t PitchPIDOutput  = ExecutePitchPID(values_received[3], Pitch);
-int16_t YawPIDOutput  = ExecuteYawPID(values_received[1], Yaw);
+int16_t YawPIDOutput  = ExecuteYawPID(values_received[0], Yaw);
 #ifdef PID
     Serial.print("RollPIDOutput:");
   Serial.print(RollPIDOutput);
@@ -209,6 +233,7 @@ int16_t YawPIDOutput  = ExecuteYawPID(values_received[1], Yaw);
     Serial.println(YawPIDOutput );
 #endif
 UpdateMotorsValues(values_received[0],PitchPIDOutput,RollPIDOutput ,YawPIDOutput);
+
 }
 else{
   MOTOR_0.writeMicroseconds(MIN_THROTTLE);
@@ -355,7 +380,9 @@ Serial.print(measured_yaw);
 Serial.print(" yaw:");
 Serial.println(ysp);
 #endif
-  return (proportional + integral + derivative);
+long long a=proportional + integral + derivative;
+//a=constrain(a,-100,100);
+  return (a);
 }
 void inline UpdateMotorsValues( const int16_t throttle, const int16_t pitch_pid_output,
 const int16_t roll_pid_output, const int16_t yaw_pid_output) {
