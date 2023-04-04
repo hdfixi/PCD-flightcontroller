@@ -4,8 +4,9 @@
 #include "nRF24L01.h"
 #include "RF24.h" 
 #include "wificalib.h"
-//bluetooth
-
+#include <SPIFFS.h>
+//file
+ File file;
 
 //DEBUG
 #define calib
@@ -14,9 +15,9 @@
 //#define DEBUG_NRF
 //#define DEBUG_MOTORS_SPEED
 //#define DEBUG_PID_VALUES
-//#define fixi
+#define fixi
 //#define fixir
-#define fixiy
+//#define fixiy
 //#define fixi_motors
 //radio mid points 
 //Yaw:1473 Roll:1465 Pitch :1454
@@ -57,17 +58,17 @@ bool calibrate = true;
 void inline MPU_Angles_Avr(int16_t &rollavr, int16_t &pitchavr, int16_t &yawavr);
 void inline Measured_Roll_Pitch_Yaw(int16_t & Roll, int16_t & Pitch, int16_t & Yaw);
 
-#define PID_PITCH_kp 1.8
-#define PID_PITCH_kd 1
-#define PID_PITCH_ki 0
+double PID_PITCH_kp =Kp;
+double PID_PITCH_kd =Kd;
+double PID_PITCH_ki =Ki;
 
-#define PID_ROLL_kp PID_PITCH_kp
-#define PID_ROLL_kd PID_PITCH_kd
-#define PID_ROLL_ki PID_PITCH_ki
+double PID_ROLL_kp =PID_PITCH_kp;
+double PID_ROLL_kd =PID_PITCH_kd;
+double PID_ROLL_ki =PID_PITCH_ki;
 
-#define PID_YAW_kp 2
-#define PID_YAW_kd 0
-#define PID_YAW_ki 0
+double PID_YAW_kp =0;
+double PID_YAW_kd =0;
+double PID_YAW_ki =0;
 
 float previous_pitch_error = .0;
 float previous_roll_error = .0;
@@ -92,7 +93,7 @@ Servo MOTOR_3;
 RF24 receiver(12, 14, 26, 25, 27);
 //RF24 (CE, CSN, SCK, MISO, MOSI); //check link for class methods:https://maniacbug.github.io/RF24/classRF24.html
 
-const uint64_t p= 0x00000001;//IMPORTANT: The same as in the transmitter
+const uint64_t p= 0x00000111;//IMPORTANT: The same as in the transmitter
 
 int16_t values_received[4];
 int16_t r,pii,y;
@@ -100,6 +101,12 @@ void Task1code( void *parameter) {
   setupwificalib();
   for(;;) {
   mainwificalib();
+    // file.print("kp:");
+    // file.print(Kp);
+    // file.print(" kd:");
+    // file.print(Kd);
+    // file.print(" ki:");
+    // file.println(Ki);
   }
 }
 
@@ -108,6 +115,7 @@ void Task1code( void *parameter) {
 
 void setup(void){
   //wifi task
+  pinMode(16,OUTPUT);
 TaskHandle_t Task1;
 xTaskCreatePinnedToCore(
       Task1code, /* Function to implement the task */
@@ -117,7 +125,19 @@ xTaskCreatePinnedToCore(
       0,  /* Priority of the task */
       &Task1,  /* Task handle. */
       0); /* Core where the task should run */
-
+//file shit 
+// SPIFFS.begin(true);
+//   if (!SPIFFS.begin()) {
+//     Serial.println("Failed to mount file system");
+//     return;
+//   }
+//    file = SPIFFS.open("/data/text.txt", "w");
+//   if (!file) {
+//     Serial.println("Failed to open file for writing");
+//     return;
+//   }
+//     file.println("Hello, world!");
+//     file.close();
 
 //wireless upload 
  //WiFi_setup(1); WebSerial_setup();  OTA_setup();
@@ -141,7 +161,7 @@ MOTOR_3.attach(ESC_3, MIN_THROTTLE, MAX_THROTTLE);
 
 
 receiver.begin();// Begin operation of the chip.
- receiver.setChannel(2);// Which RF channel to communicate on, 0-127
+ receiver.setChannel(30);// Which RF channel to communicate on, 0-127
  receiver.setPayloadSize(8);//size of data trame 
  receiver.setDataRate(RF24_250KBPS);
  receiver.openReadingPipe(1,p);
@@ -184,6 +204,9 @@ Measured_Roll_Pitch_Yaw(r, pii, y);
 }
 
 void loop(){
+
+  // Write some data to the file
+ // file.println("Hello, world!");
 if (mpu.update()) {
 Measured_Roll_Pitch_Yaw(Roll, Pitch, Yaw);
     #ifdef DEBUG_MPU
@@ -308,13 +331,19 @@ if(psp<=3&&psp>=-3)psp=0;
 error = static_cast<float>(psp- measured_pitch);
 if(error<=3 && error>=-3)
 error = 0;
-proportional = PID_PITCH_kp * error;
-derivative = PID_PITCH_kd * (error - (previous_pitch_error));
-integral += PID_PITCH_ki * (previous_pitch_error + error)/2;
+proportional = Kp * error;
+derivative = Kd * (error - (previous_pitch_error));
+integral += Ki * (previous_pitch_error + error)/2;
 previous_pitch_error = error;
 #ifdef fixi
-Serial.print(" error:");
-Serial.print(error );
+Serial.print("kp:");
+    Serial.print(Kp);
+    Serial.print(" kd:");
+    Serial.print(Kd);
+    Serial.print(" ki:");
+    Serial.print(Ki);
+Serial.print(" proportional:");
+Serial.print(proportional );
 Serial.print(" previous_pitch_error:");
 Serial.print(previous_pitch_error );
 Serial.print(" mesured pitch:");
@@ -338,9 +367,9 @@ error = static_cast<float>(rsp - measured_roll);
 
 if(error<=3 && error>=-3)
 error = 0;
-proportional = PID_ROLL_kp * error;
-derivative =PID_ROLL_kd* (error - (previous_roll_error));
-integral += PID_ROLL_ki* (previous_roll_error + error)/2;
+proportional = Kp * error;
+derivative =Kd* (error - (previous_roll_error));
+integral += Ki* (previous_roll_error + error)/2;
 previous_roll_error = error;
 #ifdef fixir
 Serial.print(" error:");
