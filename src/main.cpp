@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_task_wdt.h"
 #include<bits/stdc++.h>
 #include <SPI.h> 
 #include "nRF24L01.h"
@@ -16,12 +17,12 @@
 
 /******************DEBUG****************/
 #define DEBUG // for adding and removing debug code 
-//#define calib
+#define calib
 //#define test//with local variables
 //#define testy//with local variables
 //#define webtest
 //#define webtestyaw
-#define bmp_debug
+//#define bmp_debug
 //#define DEBUG_MPU
 //#define DEBUG_GPS
 //#define PID
@@ -39,7 +40,7 @@ float data[5];
 
 
 /****************radio mid points*****************/
-//Yaw:1473 Roll:1465 Pitch :1454
+//Yaw:1447 Roll:1443 Pitch :1438
 
 /*****************nrf******************/
 #define CE 12
@@ -83,7 +84,6 @@ Servo MOTOR_1;
 Servo MOTOR_2;
 Servo MOTOR_3;
 
-
 /**********Defines_for_mpu***************/
 MPU9250 mpu;
 int16_t rollAvr = 0;
@@ -91,25 +91,27 @@ int16_t pitchAvr = 0;
 int16_t yawAvr = 0;
 int16_t Roll=0, Pitch=0, Yaw=0;
 bool calibrate = true;
-void inline MPU_Angles_Avr(int16_t &rollavr, int16_t &pitchavr, int16_t &yawavr);
-void inline Measured_Roll_Pitch_Yaw(int16_t & Roll, int16_t & Pitch, int16_t & Yaw);
+
+
 /***************PID coef************/
-double PID_PITCH_kp =1;
-double PID_PITCH_kd =0;
-double PID_PITCH_ki =0;
+double PID_PITCH_kp =2;
+double PID_PITCH_kd =0.3;
+double PID_PITCH_ki =0.002;
 
 double PID_ROLL_kp =PID_PITCH_kp;
 double PID_ROLL_kd =PID_PITCH_kd;
 double PID_ROLL_ki =PID_PITCH_ki;
 
-double PID_YAW_kp =0;
+double PID_YAW_kp =3;
 double PID_YAW_kd =0;
-double PID_YAW_ki =0;
+double PID_YAW_ki =0.001;
 
 float previous_pitch_error = .0;
 float previous_roll_error = .0;
 float previous_yaw_error = .0;
 /************functions declaration***************/
+void inline MPU_Angles_Avr(int16_t &rollavr, int16_t &pitchavr, int16_t &yawavr);
+void inline Measured_Roll_Pitch_Yaw(int16_t & Roll, int16_t & Pitch, int16_t & Yaw);
 void update_data(double lng,double lat,double speed,double temp,double pressure);
 void Readytogo();
 void accCalib();
@@ -143,12 +145,12 @@ void setup(void){
   //wifi task
   pinMode(16,OUTPUT);
   
-    
+esp_task_wdt_init(15, true);  
 
 xTaskCreatePinnedToCore(
       bmptask, /* Function to implement the task */
       "Task1", /* Name of the task */
-      8000,  /* Stack size in words */
+      9000,  /* Stack size in words */
       NULL,  /* Task input parameter */
       0,  /* Priority of the task */
       NULL,  /* Task handle. */
@@ -156,7 +158,7 @@ xTaskCreatePinnedToCore(
 xTaskCreatePinnedToCore(
       gpstask, /* Function to implement the task */
       "Task2", /* Name of the task */
-      8000,  /* Stack size in words */
+      9000,  /* Stack size in words */
       NULL,  /* Task input parameter */
       1,  /* Priority of the task */
       NULL,  /* Task handle. */
@@ -310,11 +312,11 @@ receiver.stopListening();
 
 
 
-
 update_data(lng,lat,speed,temp,pressure);
 
 last_time=current_time;
 //delay(10);
+
 
 }
 
@@ -357,22 +359,22 @@ Serial.println(Yaw);
 
 
 int16_t inline ExecutePitchPID(const int16_t& pitch_set_point, const int16_t& measured_pitch,const float&dt) {
-float error;
+long error;
 float integral = .0;
 float proportional;
 float derivative;
 long psp=map(pitch_set_point,1000,2000,-54,66);
 psp=max((long)-50,min(psp,(long)50));
 if(psp<=3&&psp>=-3)psp=0;
-error = static_cast<float>(psp- measured_pitch);
+error = (psp- measured_pitch);
 // if(error<=3 && error>=-3)
 // error = 0;
-#ifdef test
+
 proportional = PID_PITCH_kp * error;
-derivative =PID_PITCH_kd* (error - (previous_roll_error))/dt;
-integral += error*PID_PITCH_ki*dt;
+derivative =PID_PITCH_kd* (error - (previous_roll_error));
+integral += error*PID_PITCH_ki;
 previous_roll_error = error;
-#endif
+
 #ifdef webtest
 proportional = Kp * error;
 derivative =Kd* (error - (previous_roll_error))/dt;
@@ -380,14 +382,14 @@ integral += Ki*error*dt;
 previous_roll_error = error;
 #endif
 #ifdef fixi
-Serial.print("kp:");
-    Serial.print(Kp);
-    Serial.print(" kd:");
-    Serial.print(Kd);
-    Serial.print(" ki:");
-    Serial.print(Ki);
+// Serial.print("kp:");
+//     Serial.print(Kp);
+//     Serial.print(" kd:");
+//     Serial.print(Kd);
+//     Serial.print(" ki:");
+//     Serial.print(Ki);
 Serial.print(" correction:");
-Serial.print( Ki* integral  );
+Serial.print( proportional +  integral + derivative  );
 Serial.print(" previous_pitch_error:");
 Serial.print(previous_pitch_error );
 Serial.print(" mesured pitch:");
@@ -401,7 +403,7 @@ return a;
 }
 
 int16_t inline ExecuteRollPID(const int16_t& roll_set_point, const int16_t& measured_roll,const float&dt) {
-float error;
+long error;
 float integral = .0;
 float proportional;
 float derivative;
@@ -409,16 +411,16 @@ long rsp=map(roll_set_point,1000,2000,-52,68);
 rsp=max((long)-50,min(rsp,(long)50));
 if(rsp<=3&&rsp>=-3)rsp=0;
 
-error = static_cast<float>(rsp- measured_roll);
+error = (rsp- measured_roll);
 
 // if(error<=3 && error>=-3)
 // error = 0;
-#ifdef test
+
 proportional = PID_ROLL_kp * error;
-derivative =PID_ROLL_kd* (error - (previous_roll_error))/dt;
-integral += error* PID_ROLL_ki*dt;
+derivative =PID_ROLL_kd*(error - (previous_roll_error));
+integral += error* PID_ROLL_ki;
 previous_roll_error = error;
-#endif
+
 #ifdef webtest
 proportional = Kp * error;
 derivative =Kd* (error - (previous_roll_error))/dt;
@@ -430,7 +432,7 @@ Serial.print(" error:");
 Serial.print(proportional + integral + derivative);
 Serial.print(" mesured roll:");
 Serial.print(measured_roll);
-Serial.print(" roll:");
+Serial.print(" rsp:");
 Serial.println(rsp);
 #endif
 int16_t a=proportional +  integral + derivative;
@@ -438,7 +440,7 @@ a=constrain(a,-400,400);
 return a;
 }
 int16_t inline ExecuteYawPID(const int16_t& yaw_set_point, const int16_t& measured_yaw,const float&dt) {
-  float error=0;
+  long error=0;
   static float integral = .0;
   float proportional;
   float derivative;
@@ -446,15 +448,15 @@ int16_t inline ExecuteYawPID(const int16_t& yaw_set_point, const int16_t& measur
 ysp=max((long)-50,min(ysp,(long)50));
 if(ysp<=3&&ysp>=-3)ysp=0;
 
-error = static_cast<float>(ysp - measured_yaw);
+error = (ysp - measured_yaw);
 
 //if(error<=3 && error>=-3)error = 0;
 
-#ifdef testy
+
   proportional = PID_YAW_kp * error;
-  derivative = PID_YAW_kd * (error - (previous_yaw_error))/dt;
-  integral +=  PID_YAW_ki *error*dt;
- #endif 
+  derivative = PID_YAW_kd * (error - (previous_yaw_error));
+  integral +=  PID_YAW_ki *error;
+
    #ifdef webtestyaw
   proportional = Kp * error;
   derivative = Kd* (error - (previous_yaw_error))/dt;
@@ -466,7 +468,7 @@ Serial.print(" error:");
 Serial.print(proportional + integral + derivative);
 Serial.print(" mesured yaw:");
 Serial.print(measured_yaw);
-Serial.print(" yaw:");
+Serial.print(" ysp:");
 Serial.println(ysp);
 
 #endif
@@ -558,7 +560,7 @@ void InfoGPS()
     Serial.print(F(","));
     Serial.print(lng, 6);
     Serial.print(F(" Speed: "));
-    Serial.print(lng, 6);
+    Serial.print(speed, 6);
     #endif
   }
   else
@@ -642,7 +644,7 @@ while(1) {
   if (gps.encode(ss.read()))
       InfoGPS();
 
-    vTaskDelay(pdMS_TO_TICKS(10));  
+    vTaskDelay(pdMS_TO_TICKS(100));  
   }
   vTaskDelete(NULL); 
 }
@@ -681,7 +683,7 @@ void bmptask( void *parameter){
     #endif
     
               }
-      vTaskDelay(pdMS_TO_TICKS(10));
+      vTaskDelay(pdMS_TO_TICKS(100));
     }
     vTaskDelete(NULL);              
 }
